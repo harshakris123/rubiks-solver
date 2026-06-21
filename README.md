@@ -144,4 +144,32 @@ Optional overrides:
 ```
 SOLVER_BINARY_PATH=/absolute/path/to/solver_cli   # backend: where to find the compiled solver
 VITE_API_BASE_URL=http://localhost:8000           # frontend: backend base URL
+ALLOWED_ORIGINS=https://your-frontend.example.com # backend: extra CORS origins (comma-separated)
 ```
+
+## Deploying (so you can use it on your phone)
+
+The backend shells out to a compiled C++ binary, so it needs a host that runs
+Docker rather than a pure static/serverless host. `backend/Dockerfile` builds
+`solver_cli` in a build stage and runs FastAPI in the final image; `render.yaml`
+deploys that backend plus a static frontend site on [Render](https://render.com)
+in one go.
+
+1. Push this repo to GitHub.
+2. In the Render dashboard, **New > Blueprint**, point it at the repo. Render
+   reads `render.yaml` and creates two services:
+   - `rubiks-solver-backend` — Docker web service running the API.
+   - `rubiks-solver-frontend` — static site serving the built React app.
+3. Once both exist, set the env vars (Render dashboard > each service > Environment):
+   - Backend: `GEMINI_API_KEY` = your key, `ALLOWED_ORIGINS` = the frontend's
+     `https://rubiks-solver-frontend.onrender.com` URL Render assigned it.
+   - Frontend: `VITE_API_BASE_URL` = the backend's `https://rubiks-solver-backend.onrender.com`
+     URL Render assigned it, then trigger a manual redeploy (Vite bakes env
+     vars in at build time, so this must happen *after* you know the backend URL).
+4. Open the frontend's `https://...onrender.com` URL on your phone's browser.
+   Camera capture requires HTTPS, which Render provides by default — no extra
+   config needed. Optionally "Add to Home Screen" from the browser menu for an
+   app-like icon.
+
+Render's free tier spins down idle services, so the first request after a
+while will be slow (cold start) while the container restarts.
