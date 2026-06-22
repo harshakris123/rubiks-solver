@@ -1,5 +1,6 @@
 #include "Cube.h"
 #include "Move.h"
+#include "PdbDir.h"
 #include "Solver.h"
 #include <iomanip>
 #include <iostream>
@@ -19,10 +20,10 @@ static Cube scrambleCube(int n, std::mt19937& rng) {
 
 int main() {
     std::mt19937 rng(std::random_device{}());
-    Solver solver;
+    Solver solver(resolvePdbDir());
 
-    std::cout << "Rubik's Cube Solver Benchmark (Bidirectional BFS)\n";
-    std::cout << "==================================================\n";
+    std::cout << "Rubik's Cube Solver Benchmark (IDA* + corner/edge pattern databases)\n";
+    std::cout << "======================================================================\n";
     std::cout << std::left
               << std::setw(18) << "Scramble Depth"
               << std::setw(20) << "Solve Time (ms)"
@@ -30,7 +31,10 @@ int main() {
               << "\n";
     std::cout << std::string(58, '-') << "\n";
 
-    for (int depth = 1; depth <= 10; depth++) {
+    // Beyond ~16, a single random scramble's solve time varies hugely (see
+    // solver/interview.md: optimal IDA* has no bounded worst case), so this
+    // loop stops at 18 to keep the benchmark itself fast and reproducible.
+    for (int depth = 1; depth <= 18; depth++) {
         Cube scrambled = scrambleCube(depth, rng);
         Solver::Result result = solver.solve(scrambled);
 
@@ -41,6 +45,7 @@ int main() {
         } else {
             std::cout << std::setw(20) << "N/A" << std::setw(20) << "NOT FOUND" << "\n";
         }
+        std::cout.flush();
     }
 
     std::cout << "\nDone.\n";

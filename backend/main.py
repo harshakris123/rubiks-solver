@@ -133,7 +133,7 @@ def solve(request: SolveRequest):
             input=" ".join(str(x) for x in sticker_ids),
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=90,
         )
     except FileNotFoundError:
         raise HTTPException(

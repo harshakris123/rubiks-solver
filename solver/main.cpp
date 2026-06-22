@@ -1,5 +1,6 @@
 #include "Cube.h"
 #include "Move.h"
+#include "PdbDir.h"
 #include "Solver.h"
 #include <algorithm>
 #include <array>
@@ -87,7 +88,7 @@ void runTestMode(const std::vector<std::string>& scrambleMoves) {
     std::cout << "Scrambled state:\n";
     cube.print();
 
-    Solver solver;
+    Solver solver(resolvePdbDir());
     Solver::Result result = solver.solve(cube);
 
     if (!result.found) {
@@ -96,7 +97,8 @@ void runTestMode(const std::vector<std::string>& scrambleMoves) {
     }
 
     std::cout << "\nSolved in " << result.moves.size() << " moves ("
-              << result.solveTimeMs << " ms):\n";
+              << result.solveTimeMs << " ms" << (result.optimal ? "" : ", greedy fallback, not optimal")
+              << "):\n";
     for (const auto& m : result.moves) std::cout << m << " ";
     std::cout << "\n";
 }
@@ -117,7 +119,7 @@ void runStdinMode() {
     Cube cube;
     cube.stickers = values;
 
-    Solver solver;
+    Solver solver(resolvePdbDir());
     Solver::Result result = solver.solve(cube);
 
     if (!result.found) {
@@ -135,26 +137,32 @@ void runStdinMode() {
               << "\"moves\": " << jsonStringArray(result.moves) << ", "
               << "\"descriptions\": " << jsonStringArray(descriptions) << ", "
               << "\"solve_time_ms\": " << result.solveTimeMs << ", "
-              << "\"total_moves\": " << result.moves.size()
+              << "\"total_moves\": " << result.moves.size() << ", "
+              << "\"optimal\": " << (result.optimal ? "true" : "false")
               << "}\n";
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc > 1 && std::string(argv[1]) == "--test") {
-        std::vector<std::string> scramble;
-        if (argc > 2) {
-            std::istringstream iss(argv[2]);
-            std::string tok;
-            while (iss >> tok) scramble.push_back(tok);
-        } else {
-            scramble = { "R", "U", "F'", "L2", "D'" };
+    try {
+        if (argc > 1 && std::string(argv[1]) == "--test") {
+            std::vector<std::string> scramble;
+            if (argc > 2) {
+                std::istringstream iss(argv[2]);
+                std::string tok;
+                while (iss >> tok) scramble.push_back(tok);
+            } else {
+                scramble = { "R", "U", "F'", "L2", "D'" };
+            }
+            runTestMode(scramble);
+            return 0;
         }
-        runTestMode(scramble);
-        return 0;
-    }
 
-    runStdinMode();
-    return 0;
+        runStdinMode();
+        return 0;
+    } catch (const std::exception& exc) {
+        std::cout << "{\"error\": \"" << exc.what() << "\"}\n";
+        return 1;
+    }
 }

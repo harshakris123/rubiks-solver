@@ -16,6 +16,8 @@ frontend/tsconfig.tsbuildinfo
 
 # C++ build artifacts
 solver/build/
+solver/*.exe
+solver/*.dat
 
 # Editor/OS
 .DS_Store

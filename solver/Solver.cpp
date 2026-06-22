@@ -1,111 +1,107 @@
 #include "Solver.h"
+#include "Coord.h"
 #include "Move.h"
+#include "PatternDB.h"
+#include <algorithm>
 #include <chrono>
-#include <unordered_map>
-#include <vector>
 
 namespace {
 
-struct Node {
-    Cube cube;
-    int lastFace; // face index of the last move applied, -1 if none
-};
+int heuristic(const coord::CubieState& state, const std::vector<uint8_t>& cornerDB,
+              const std::vector<uint8_t>& edgeDB0, const std::vector<uint8_t>& edgeDB1) {
+    int cornerH = pdb::lookup(cornerDB, pdb::cornerIndex(state.cornerPerm, state.cornerOri));
+    int edge0H = pdb::lookup(edgeDB0, pdb::edgeIndex(state, 0));
+    int edge1H = pdb::lookup(edgeDB1, pdb::edgeIndex(state, 1));
+    return std::max({cornerH, edge0H, edge1H});
+}
 
-using VisitedMap = std::unordered_map<std::string, std::vector<std::string>>;
+// Depth-first search bounded by `bound` on f = g + h (standard IDA*). Returns
+// true and leaves the solution in `pathMoves` if found within bound;
+// otherwise records the smallest f that exceeded bound into `nextBound`, so
+// the caller knows what threshold to retry with.
+bool dfs(const coord::CubieState& state, int g, int bound, int lastFace, std::vector<int>& pathMoves,
+         const std::vector<uint8_t>& cornerDB, const std::vector<uint8_t>& edgeDB0,
+         const std::vector<uint8_t>& edgeDB1, const std::array<int, coord::NUM_MOVES>& moveFaces,
+         int& nextBound) {
+    if (state.isSolved()) return true;
 
-// Expands one full BFS layer for one side. Returns the new frontier and
-// stops early (returning an empty vector signal via foundMeeting) if a
-// state is discovered that the opposite side has already visited.
-bool expandLayer(std::vector<Node>& frontier,
-                  VisitedMap& visitedSame,
-                  const VisitedMap& visitedOther,
-                  std::vector<Node>& nextFrontier,
-                  std::string& meetingKey) {
-    const auto& moves = Move::getAllMoves();
+    int h = heuristic(state, cornerDB, edgeDB0, edgeDB1);
+    int f = g + h;
+    if (f > bound) {
+        if (nextBound == -1 || f < nextBound) nextBound = f;
+        return false;
+    }
 
-    for (const auto& node : frontier) {
-        const std::string curKey = node.cube.serialize();
-        const std::vector<std::string>& curPath = visitedSame[curKey];
-
-        for (const auto& mv : moves) {
-            if (mv.getFaceIndex() == node.lastFace) continue; // skip redundant same-face turns
-
-            Cube next = node.cube;
-            next.applyMove(mv);
-            std::string key = next.serialize();
-
-            if (visitedSame.find(key) != visitedSame.end()) continue;
-
-            std::vector<std::string> newPath = curPath;
-            newPath.push_back(mv.getName());
-            visitedSame[key] = newPath;
-            nextFrontier.push_back({ next, mv.getFaceIndex() });
-
-            if (visitedOther.find(key) != visitedOther.end()) {
-                meetingKey = key;
-                return true;
-            }
+    for (int m = 0; m < coord::NUM_MOVES; m++) {
+        // Two consecutive same-face turns are never part of an optimal
+        // solution (U U' cancels, U U = U2, U U2 = U', so any such pair
+        // collapses to at most one move) — safe to skip, pure speedup.
+        if (moveFaces[m] == lastFace) continue;
+        coord::CubieState next = coord::applyMove(state, m);
+        pathMoves.push_back(m);
+        if (dfs(next, g + 1, bound, moveFaces[m], pathMoves, cornerDB, edgeDB0, edgeDB1, moveFaces,
+                nextBound)) {
+            return true;
         }
+        pathMoves.pop_back();
     }
     return false;
 }
 
 } // namespace
 
-Solver::Result Solver::solve(const Cube& scrambled, int maxDepthPerSide) {
+Solver::Solver(const std::string& dataDir) {
+    if (!pdb::load(cornerDB_, dataDir + "/corner_pdb.dat", pdb::CORNER_DB_SIZE)) {
+        throw std::runtime_error(
+            "Could not load corner pattern database from '" + dataDir +
+            "/corner_pdb.dat'. Run pdb_gen first to generate it.");
+    }
+    if (!pdb::load(edgeDB0_, dataDir + "/edge0_pdb.dat", pdb::EDGE_DB_SIZE)) {
+        throw std::runtime_error(
+            "Could not load edge pattern database from '" + dataDir +
+            "/edge0_pdb.dat'. Run pdb_gen first to generate it.");
+    }
+    if (!pdb::load(edgeDB1_, dataDir + "/edge1_pdb.dat", pdb::EDGE_DB_SIZE)) {
+        throw std::runtime_error(
+            "Could not load edge pattern database from '" + dataDir +
+            "/edge1_pdb.dat'. Run pdb_gen first to generate it.");
+    }
+}
+
+Solver::Result Solver::solve(const Cube& scrambled, int maxDepth, int timeBudgetMs) const {
+    (void)timeBudgetMs; // unused: see Solver.h — kept simple, single-phase optimal IDA*.
     auto startTime = std::chrono::steady_clock::now();
     Result result;
 
-    if (scrambled.isSolved()) {
+    coord::CubieState start = coord::extract(scrambled);
+    if (start.isSolved()) {
         result.found = true;
+        result.optimal = true;
         result.solveTimeMs = 0.0;
         return result;
     }
 
-    Cube solved;
-    VisitedMap visitedF, visitedB;
-    visitedF[scrambled.serialize()] = {};
-    visitedB[solved.serialize()] = {};
+    const auto& moves = Move::getAllMoves();
+    std::array<int, coord::NUM_MOVES> moveFaces{};
+    for (int m = 0; m < coord::NUM_MOVES; m++) moveFaces[m] = moves[m].getFaceIndex();
 
-    std::vector<Node> frontierF = { { scrambled, -1 } };
-    std::vector<Node> frontierB = { { solved, -1 } };
+    int bound = heuristic(start, cornerDB_, edgeDB0_, edgeDB1_);
+    std::vector<int> pathMoves;
 
-    std::string meetingKey;
-
-    for (int depth = 0; depth < maxDepthPerSide * 2; depth++) {
-        bool expandForward = frontierF.size() <= frontierB.size();
-        std::vector<Node> nextFrontier;
-
-        bool met = expandForward
-            ? expandLayer(frontierF, visitedF, visitedB, nextFrontier, meetingKey)
-            : expandLayer(frontierB, visitedB, visitedF, nextFrontier, meetingKey);
-
-        if (met) {
-            const std::vector<std::string>& pathF = visitedF[meetingKey];
-            const std::vector<std::string>& pathB = visitedB[meetingKey];
-
-            std::vector<std::string> solution = pathF;
-            for (auto it = pathB.rbegin(); it != pathB.rend(); ++it) {
-                solution.push_back(Move::inverseName(*it));
-            }
-
-            result.moves = solution;
+    while (bound <= maxDepth) {
+        int nextBound = -1;
+        bool found = dfs(start, 0, bound, -1, pathMoves, cornerDB_, edgeDB0_, edgeDB1_, moveFaces, nextBound);
+        if (found) {
             result.found = true;
-            auto endTime = std::chrono::steady_clock::now();
-            result.solveTimeMs = std::chrono::duration<double, std::milli>(endTime - startTime).count();
-            return result;
+            result.optimal = true;
+            result.moves.reserve(pathMoves.size());
+            for (int m : pathMoves) result.moves.push_back(moves[m].getName());
+            break;
         }
-
-        if (expandForward) {
-            frontierF = std::move(nextFrontier);
-            if (frontierF.empty()) break;
-        } else {
-            frontierB = std::move(nextFrontier);
-            if (frontierB.empty()) break;
-        }
+        if (nextBound == -1) break;
+        bound = nextBound;
     }
 
-    result.found = false;
     auto endTime = std::chrono::steady_clock::now();
     result.solveTimeMs = std::chrono::duration<double, std::milli>(endTime - startTime).count();
     return result;
