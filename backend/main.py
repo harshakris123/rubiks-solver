@@ -89,15 +89,10 @@ def detect(request: FaceImages):
         "right": request.right,
     }
 
-    colors: Dict[str, List[str]] = {}
-    for name, b64_image in images.items():
-        try:
-            colors[name] = vision.get_face_colors(b64_image)
-        except (ValueError, RuntimeError) as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Vision detection failed for face '{name}': {exc}",
-            )
+    try:
+        colors = vision.get_all_face_colors(images)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Vision detection failed: {exc}")
 
     return {"colors": colors}
 
@@ -115,15 +110,10 @@ def solve(request: SolveRequest):
             "left": request.left,
             "right": request.right,
         }
-        faces = {}
-        for name, b64_image in images.items():
-            try:
-                faces[name] = vision.get_face_colors(b64_image)
-            except (ValueError, RuntimeError) as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Vision detection failed for face '{name}': {exc}",
-                )
+        try:
+            faces = vision.get_all_face_colors(images)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Vision detection failed: {exc}")
 
     try:
         validate_cube_state(faces)
