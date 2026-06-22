@@ -1,5 +1,5 @@
 """
-Uses Google Gemini Vision (gemini-1.5-flash) to read the 9 sticker colors
+Uses Google Gemini Vision (gemini-2.5-flash) to read the 9 sticker colors
 off a single photographed Rubik's Cube face.
 """
 import base64
@@ -29,7 +29,7 @@ def _get_model():
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY environment variable is not set")
         genai.configure(api_key=api_key)
-        _model = genai.GenerativeModel("gemini-1.5-flash")
+        _model = genai.GenerativeModel("gemini-2.5-flash")
     return _model
 
 
